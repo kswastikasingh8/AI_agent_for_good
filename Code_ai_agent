@@ -1,0 +1,1010 @@
+"""
+AI Agents for Good - Mental Health Support System
+A multi-agent system that helps people find mental health resources and support.
+
+Key Concepts Demonstrated:
+1. Multi-agent system (Sequential + Parallel agents)
+2. Tools (Custom tools, web search, MCP)
+3. Sessions & Memory (InMemorySessionService, Memory Bank)
+4. Observability (Logging, Tracing)
+5. Context engineering (Context compaction)
+"""
+
+import asyncio
+import json
+import logging
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, asdict
+from enum import Enum
+
+# Configure logging for observability
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# DATA MODELS & ENUMS
+# ============================================================================
+
+class CrisisLevel(Enum):
+    """Severity levels for mental health concerns"""
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    EMERGENCY = "emergency"
+
+
+class ResourceType(Enum):
+    """Types of mental health resources"""
+    HOTLINE = "hotline"
+    THERAPY = "therapy"
+    SUPPORT_GROUP = "support_group"
+    EMERGENCY = "emergency"
+    EDUCATIONAL = "educational"
+
+
+@dataclass
+class UserSession:
+    """Represents a user session with state management"""
+    session_id: str
+    user_concerns: List[str]
+    crisis_level: CrisisLevel
+    conversation_history: List[Dict[str, str]]
+    recommended_resources: List[Dict[str, Any]]
+    created_at: datetime
+    last_updated: datetime
+
+    def to_dict(self):
+        return {
+            **asdict(self),
+            'crisis_level': self.crisis_level.value,
+            'created_at': self.created_at.isoformat(),
+            'last_updated': self.last_updated.isoformat()
+        }
+
+
+@dataclass
+class Resource:
+    """Mental health resource information"""
+    name: str
+    type: ResourceType
+    description: str
+    contact: str
+    availability: str
+    cost: str
+    languages: List[str]
+    
+    def to_dict(self):
+        return {**asdict(self), 'type': self.type.value}
+
+
+# ============================================================================
+# SESSION & MEMORY MANAGEMENT
+# ============================================================================
+
+class InMemorySessionService:
+    """
+    Manages user sessions in memory
+    Concept: Sessions & State Management
+    """
+    
+    def __init__(self):
+        self.sessions: Dict[str, UserSession] = {}
+        logger.info("InMemorySessionService initialized")
+    
+    def create_session(self, session_id: str) -> UserSession:
+        """Create a new user session"""
+        session = UserSession(
+            session_id=session_id,
+            user_concerns=[],
+            crisis_level=CrisisLevel.LOW,
+            conversation_history=[],
+            recommended_resources=[],
+            created_at=datetime.now(),
+            last_updated=datetime.now()
+        )
+        self.sessions[session_id] = session
+        logger.info(f"Created session: {session_id}")
+        return session
+    
+    def get_session(self, session_id: str) -> Optional[UserSession]:
+        """Retrieve a session by ID"""
+        return self.sessions.get(session_id)
+    
+    def update_session(self, session: UserSession):
+        """Update an existing session"""
+        session.last_updated = datetime.now()
+        self.sessions[session.session_id] = session
+        logger.info(f"Updated session: {session.session_id}")
+
+
+class MemoryBank:
+    """
+    Long-term memory storage for learning from interactions
+    Concept: Long-term Memory
+    """
+    
+    def __init__(self):
+        self.interaction_patterns: Dict[str, int] = {}
+        self.successful_resources: Dict[str, int] = {}
+        self.common_concerns: Dict[str, int] = {}
+        logger.info("MemoryBank initialized")
+    
+    def record_interaction(self, concern: str, resource: str, helpful: bool):
+        """Record interaction outcomes for learning"""
+        # Track concern patterns
+        self.common_concerns[concern] = self.common_concerns.get(concern, 0) + 1
+        
+        # Track successful resources
+        if helpful:
+            self.successful_resources[resource] = \
+                self.successful_resources.get(resource, 0) + 1
+        
+        logger.info(f"Recorded interaction: {concern} -> {resource} (helpful: {helpful})")
+    
+    def get_top_resources(self, n: int = 5) -> List[str]:
+        """Get most helpful resources based on history"""
+        sorted_resources = sorted(
+            self.successful_resources.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return [r[0] for r in sorted_resources[:n]]
+    
+    def get_common_concerns(self, n: int = 5) -> List[str]:
+        """Get most common concerns"""
+        sorted_concerns = sorted(
+            self.common_concerns.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        return [c[0] for c in sorted_concerns[:n]]
+
+
+# ============================================================================
+# TOOLS
+# ============================================================================
+
+class CrisisDetectionTool:
+    """
+    Custom tool for detecting crisis situations
+    Concept: Custom Tools
+    """
+    
+    EMERGENCY_KEYWORDS = [
+        'suicide', 'kill myself', 'end my life', 'hurt myself',
+        'self-harm', 'want to die', 'no reason to live'
+    ]
+    
+    HIGH_RISK_KEYWORDS = [
+        'panic attack', 'can\'t breathe', 'overwhelming',
+        'losing control', 'severe anxiety', 'breakdown'
+    ]
+    
+    MODERATE_KEYWORDS = [
+        'depressed', 'anxious', 'stressed', 'worried',
+        'can\'t sleep', 'no energy', 'feeling down'
+    ]
+    
+    def detect_crisis_level(self, text: str) -> CrisisLevel:
+        """Analyze text to determine crisis level"""
+        text_lower = text.lower()
+        
+        # Check for emergency keywords
+        if any(keyword in text_lower for keyword in self.EMERGENCY_KEYWORDS):
+            logger.warning(f"EMERGENCY level detected in text")
+            return CrisisLevel.EMERGENCY
+        
+        # Check for high risk
+        if any(keyword in text_lower for keyword in self.HIGH_RISK_KEYWORDS):
+            logger.warning(f"HIGH crisis level detected")
+            return CrisisLevel.HIGH
+        
+        # Check for moderate concerns
+        if any(keyword in text_lower for keyword in self.MODERATE_KEYWORDS):
+            logger.info(f"MODERATE crisis level detected")
+            return CrisisLevel.MODERATE
+        
+        return CrisisLevel.LOW
+
+
+class ResourceDatabaseTool:
+    """
+    Simulates MCP connection to mental health resource database
+    Concept: MCP (Model Context Protocol)
+    """
+    
+    def __init__(self):
+        # Simulated database of mental health resources
+        self.resources = [
+            Resource(
+                name="National Suicide Prevention Lifeline",
+                type=ResourceType.EMERGENCY,
+                description="24/7 free and confidential support for people in distress",
+                contact="988 (US) or 1-800-273-8255",
+                availability="24/7",
+                cost="Free",
+                languages=["English", "Spanish"]
+            ),
+            Resource(
+                name="Crisis Text Line",
+                type=ResourceType.EMERGENCY,
+                description="Free 24/7 text support for people in crisis",
+                contact="Text HOME to 741741",
+                availability="24/7",
+                cost="Free",
+                languages=["English", "Spanish"]
+            ),
+            Resource(
+                name="NAMI Helpline",
+                type=ResourceType.HOTLINE,
+                description="Information and referral service for mental health",
+                contact="1-800-950-NAMI (6264)",
+                availability="Mon-Fri 10am-10pm ET",
+                cost="Free",
+                languages=["English", "Spanish"]
+            ),
+            Resource(
+                name="BetterHelp Online Therapy",
+                type=ResourceType.THERAPY,
+                description="Online counseling and therapy platform",
+                contact="www.betterhelp.com",
+                availability="Flexible scheduling",
+                cost="$60-90/week",
+                languages=["English", "Spanish", "Others"]
+            ),
+            Resource(
+                name="Depression and Bipolar Support Alliance",
+                type=ResourceType.SUPPORT_GROUP,
+                description="Peer support groups for mood disorders",
+                contact="www.dbsalliance.org",
+                availability="Various times",
+                cost="Free",
+                languages=["English"]
+            ),
+            Resource(
+                name="Anxiety and Depression Association",
+                type=ResourceType.EDUCATIONAL,
+                description="Educational resources and treatment information",
+                contact="www.adaa.org",
+                availability="Always available",
+                cost="Free",
+                languages=["English"]
+            )
+        ]
+        logger.info(f"ResourceDatabaseTool initialized with {len(self.resources)} resources")
+    
+    def search_resources(
+        self,
+        crisis_level: CrisisLevel,
+        resource_types: Optional[List[ResourceType]] = None
+    ) -> List[Resource]:
+        """Search for appropriate resources based on crisis level"""
+        
+        # Emergency cases get crisis resources immediately
+        if crisis_level == CrisisLevel.EMERGENCY:
+            results = [r for r in self.resources if r.type == ResourceType.EMERGENCY]
+            logger.info(f"Emergency resources found: {len(results)}")
+            return results
+        
+        # Filter by resource types if specified
+        if resource_types:
+            results = [r for r in self.resources if r.type in resource_types]
+        else:
+            results = self.resources
+        
+        logger.info(f"Found {len(results)} matching resources")
+        return results
+
+
+class WebSearchTool:
+    """
+    Simulates web search for mental health information
+    Concept: Built-in Tools (Web Search)
+    """
+    
+    async def search(self, query: str) -> List[Dict[str, str]]:
+        """Simulate web search for mental health resources"""
+        # In real implementation, this would use actual web search API
+        logger.info(f"Performing web search: {query}")
+        
+        # Simulated search results
+        await asyncio.sleep(0.5)  # Simulate API call
+        
+        return [
+            {
+                "title": "Understanding Mental Health - WHO",
+                "url": "https://www.who.int/mental_health",
+                "snippet": "Mental health resources and information from WHO"
+            },
+            {
+                "title": "Mental Health America",
+                "url": "https://www.mhanational.org",
+                "snippet": "Advocacy and resources for mental health"
+            }
+        ]
+
+
+# ============================================================================
+# AGENTS
+# ============================================================================
+
+class TriageAgent:
+    """
+    Agent 1: Assesses user situation and determines severity
+    Concept: LLM-powered Agent (Sequential workflow)
+    """
+    
+    def __init__(self, crisis_tool: CrisisDetectionTool):
+        self.crisis_tool = crisis_tool
+        self.name = "TriageAgent"
+        logger.info(f"{self.name} initialized")
+    
+    async def assess(self, user_input: str, session: UserSession) -> Dict[str, Any]:
+        """Assess user's mental health situation"""
+        logger.info(f"{self.name}: Assessing user input")
+        
+        # Detect crisis level
+        crisis_level = self.crisis_tool.detect_crisis_level(user_input)
+        
+        # Extract concerns (simplified - in real system would use LLM)
+        concerns = self._extract_concerns(user_input)
+        
+        # Update session
+        session.crisis_level = crisis_level
+        session.user_concerns.extend(concerns)
+        session.conversation_history.append({
+            "role": "user",
+            "content": user_input,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        assessment = {
+            "crisis_level": crisis_level,
+            "concerns": concerns,
+            "requires_immediate_attention": crisis_level in [
+                CrisisLevel.EMERGENCY,
+                CrisisLevel.HIGH
+            ]
+        }
+        
+        logger.info(f"{self.name}: Assessment complete - Level: {crisis_level.value}")
+        return assessment
+    
+    def _extract_concerns(self, text: str) -> List[str]:
+        """Extract mental health concerns from text (simplified)"""
+        concerns = []
+        text_lower = text.lower()
+        
+        concern_keywords = {
+            'anxiety': ['anxiety', 'anxious', 'panic', 'worried'],
+            'depression': ['depressed', 'depression', 'sad', 'hopeless'],
+            'stress': ['stress', 'stressed', 'overwhelmed'],
+            'sleep': ['sleep', 'insomnia', 'can\'t sleep'],
+            'trauma': ['trauma', 'ptsd', 'flashbacks']
+        }
+        
+        for concern, keywords in concern_keywords.items():
+            if any(keyword in text_lower for keyword in keywords):
+                concerns.append(concern)
+        
+        return concerns if concerns else ['general_wellbeing']
+
+
+class ResourceAgent:
+    """
+    Agent 2: Finds and recommends appropriate resources
+    Concept: Agent with MCP tool integration
+    """
+    
+    def __init__(self, resource_db: ResourceDatabaseTool, memory: MemoryBank):
+        self.resource_db = resource_db
+        self.memory = memory
+        self.name = "ResourceAgent"
+        logger.info(f"{self.name} initialized")
+    
+    async def find_resources(
+        self,
+        assessment: Dict[str, Any],
+        session: UserSession
+    ) -> List[Resource]:
+        """Find appropriate resources based on assessment"""
+        logger.info(f"{self.name}: Finding resources")
+        
+        crisis_level = assessment['crisis_level']
+        
+        # Get resources from database
+        resources = self.resource_db.search_resources(crisis_level)
+        
+        # Prioritize based on memory bank (learning from past success)
+        top_resources = self.memory.get_top_resources()
+        
+        # Sort resources: emergency first, then by past success
+        def resource_priority(r: Resource) -> int:
+            score = 0
+            if r.type == ResourceType.EMERGENCY:
+                score += 1000
+            if r.name in top_resources:
+                score += 100 - top_resources.index(r.name)
+            return score
+        
+        resources.sort(key=resource_priority, reverse=True)
+        
+        # Update session
+        session.recommended_resources = [r.to_dict() for r in resources]
+        
+        logger.info(f"{self.name}: Found {len(resources)} resources")
+        return resources
+
+
+class SupportAgent:
+    """
+    Agent 3: Provides supportive responses and guidance
+    Concept: LLM-powered Agent with empathy
+    """
+    
+    def __init__(self, web_search: WebSearchTool):
+        self.web_search = web_search
+        self.name = "SupportAgent"
+        logger.info(f"{self.name} initialized")
+    
+    async def generate_response(
+        self,
+        assessment: Dict[str, Any],
+        resources: List[Resource],
+        session: UserSession
+    ) -> str:
+        """Generate supportive response with resources"""
+        logger.info(f"{self.name}: Generating response")
+        
+        crisis_level = assessment['crisis_level']
+        
+        # Emergency response
+        if crisis_level == CrisisLevel.EMERGENCY:
+            response = self._generate_emergency_response(resources)
+        else:
+            response = self._generate_supportive_response(
+                assessment,
+                resources,
+                session
+            )
+        
+        # Add to conversation history
+        session.conversation_history.append({
+            "role": "assistant",
+            "content": response,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        logger.info(f"{self.name}: Response generated")
+        return response
+    
+    def _generate_emergency_response(self, resources: List[Resource]) -> str:
+        """Generate immediate crisis response"""
+        response = "🚨 I'm concerned about your safety. Please reach out for immediate help:\n\n"
+        
+        for resource in resources[:2]:  # Top 2 emergency resources
+            response += f"📞 {resource.name}\n"
+            response += f"   Contact: {resource.contact}\n"
+            response += f"   {resource.availability}\n\n"
+        
+        response += "You don't have to face this alone. These services are free, confidential, and available right now."
+        
+        return response
+    
+    def _generate_supportive_response(
+        self,
+        assessment: Dict[str, Any],
+        resources: List[Resource],
+        session: UserSession
+    ) -> str:
+        """Generate supportive response with recommendations"""
+        concerns = assessment['concerns']
+        
+        response = "Thank you for sharing what you're going through. "
+        
+        if concerns:
+            concern_text = ', '.join(concerns)
+            response += f"I understand you're dealing with {concern_text}. "
+        
+        response += "Here are some resources that might help:\n\n"
+        
+        # Group resources by type
+        resource_groups = {}
+        for resource in resources[:5]:  # Top 5 resources
+            resource_type = resource.type.value
+            if resource_type not in resource_groups:
+                resource_groups[resource_type] = []
+            resource_groups[resource_type].append(resource)
+        
+        # Format resources
+        for resource_type, type_resources in resource_groups.items():
+            response += f"\n📋 {resource_type.upper().replace('_', ' ')}:\n"
+            for resource in type_resources:
+                response += f"  • {resource.name}\n"
+                response += f"    Contact: {resource.contact}\n"
+                response += f"    Cost: {resource.cost}\n"
+        
+        response += "\n💙 Remember, seeking help is a sign of strength, not weakness."
+        
+        return response
+
+
+class MonitoringAgent:
+    """
+    Agent 4: Monitors system performance and logs metrics
+    Concept: Observability - Logging, Tracing, Metrics
+    """
+    
+    def __init__(self):
+        self.name = "MonitoringAgent"
+        self.metrics = {
+            "total_sessions": 0,
+            "emergency_cases": 0,
+            "high_risk_cases": 0,
+            "moderate_cases": 0,
+            "low_risk_cases": 0,
+            "average_response_time": 0.0,
+            "total_resources_provided": 0
+        }
+        logger.info(f"{self.name} initialized")
+    
+    def log_interaction(
+        self,
+        session: UserSession,
+        assessment: Dict[str, Any],
+        response_time: float
+    ):
+        """Log interaction metrics"""
+        self.metrics["total_sessions"] += 1
+        self.metrics["total_resources_provided"] += len(session.recommended_resources)
+        
+        # Update crisis level counts
+        crisis_level = assessment['crisis_level']
+        if crisis_level == CrisisLevel.EMERGENCY:
+            self.metrics["emergency_cases"] += 1
+        elif crisis_level == CrisisLevel.HIGH:
+            self.metrics["high_risk_cases"] += 1
+        elif crisis_level == CrisisLevel.MODERATE:
+            self.metrics["moderate_cases"] += 1
+        else:
+            self.metrics["low_risk_cases"] += 1
+        
+        # Update average response time
+        total_sessions = self.metrics["total_sessions"]
+        current_avg = self.metrics["average_response_time"]
+        self.metrics["average_response_time"] = \
+            (current_avg * (total_sessions - 1) + response_time) / total_sessions
+        
+        logger.info(f"{self.name}: Logged interaction - Response time: {response_time:.2f}s")
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get current system metrics"""
+        return self.metrics.copy()
+    
+    def generate_report(self) -> str:
+        """Generate metrics report"""
+        report = "\n" + "="*50 + "\n"
+        report += "SYSTEM METRICS REPORT\n"
+        report += "="*50 + "\n"
+        report += f"Total Sessions: {self.metrics['total_sessions']}\n"
+        report += f"Emergency Cases: {self.metrics['emergency_cases']}\n"
+        report += f"High Risk Cases: {self.metrics['high_risk_cases']}\n"
+        report += f"Moderate Cases: {self.metrics['moderate_cases']}\n"
+        report += f"Low Risk Cases: {self.metrics['low_risk_cases']}\n"
+        report += f"Total Resources Provided: {self.metrics['total_resources_provided']}\n"
+        report += f"Average Response Time: {self.metrics['average_response_time']:.2f}s\n"
+        report += "="*50 + "\n"
+        
+        return report
+
+
+# ============================================================================
+# ORCHESTRATOR - MULTI-AGENT COORDINATOR
+# ============================================================================
+
+class MentalHealthOrchestrator:
+    """
+    Main orchestrator that coordinates all agents
+    Concept: Multi-agent System (Sequential workflow)
+    """
+    
+    def __init__(self):
+        # Initialize tools
+        self.crisis_tool = CrisisDetectionTool()
+        self.resource_db = ResourceDatabaseTool()
+        self.web_search = WebSearchTool()
+        
+        # Initialize memory and session management
+        self.session_service = InMemorySessionService()
+        self.memory_bank = MemoryBank()
+        
+        # Initialize agents
+        self.triage_agent = TriageAgent(self.crisis_tool)
+        self.resource_agent = ResourceAgent(self.resource_db, self.memory_bank)
+        self.support_agent = SupportAgent(self.web_search)
+        self.monitoring_agent = MonitoringAgent()
+        
+        logger.info("MentalHealthOrchestrator initialized")
+    
+    async def process_request(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Main workflow: Process user request through agent pipeline
+        Sequential Agent Pattern: Triage -> Resource -> Support
+        """
+        start_time = datetime.now()
+        
+        # Get or create session
+        if session_id and self.session_service.get_session(session_id):
+            session = self.session_service.get_session(session_id)
+            logger.info(f"Using existing session: {session_id}")
+        else:
+            session_id = f"session_{datetime.now().timestamp()}"
+            session = self.session_service.create_session(session_id)
+            logger.info(f"Created new session: {session_id}")
+        
+        try:
+            # STEP 1: Triage Agent assesses the situation
+            logger.info("STEP 1: Triage assessment")
+            assessment = await self.triage_agent.assess(user_input, session)
+            
+            # STEP 2: Resource Agent finds appropriate resources
+            logger.info("STEP 2: Finding resources")
+            resources = await self.resource_agent.find_resources(assessment, session)
+            
+            # STEP 3: Support Agent generates response
+            logger.info("STEP 3: Generating support response")
+            response = await self.support_agent.generate_response(
+                assessment,
+                resources,
+                session
+            )
+            
+            # Calculate response time
+            end_time = datetime.now()
+            response_time = (end_time - start_time).total_seconds()
+            
+            # STEP 4: Monitoring Agent logs metrics
+            logger.info("STEP 4: Logging metrics")
+            self.monitoring_agent.log_interaction(session, assessment, response_time)
+            
+            # Update session
+            self.session_service.update_session(session)
+            
+            # Return result
+            result = {
+                "session_id": session_id,
+                "response": response,
+                "crisis_level": assessment['crisis_level'].value,
+                "concerns": assessment['concerns'],
+                "resources_count": len(resources),
+                "response_time": response_time
+            }
+            
+            logger.info(f"Request processed successfully in {response_time:.2f}s")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "error": "An error occurred processing your request",
+                "session_id": session_id
+            }
+    
+    async def process_parallel_requests(self, requests: List[str]) -> List[Dict[str, Any]]:
+        """
+        Process multiple requests in parallel
+        Concept: Parallel Agents
+        """
+        logger.info(f"Processing {len(requests)} requests in parallel")
+        
+        # Create tasks for parallel execution
+        tasks = [self.process_request(req) for req in requests]
+        
+        # Execute in parallel
+        results = await asyncio.gather(*tasks)
+        
+        logger.info(f"Completed {len(results)} parallel requests")
+        return results
+    
+    def get_session_history(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve session history"""
+        session = self.session_service.get_session(session_id)
+        if session:
+            return session.to_dict()
+        return None
+    
+    def get_system_metrics(self) -> Dict[str, Any]:
+        """Get system-wide metrics"""
+        return self.monitoring_agent.get_metrics()
+    
+    def generate_metrics_report(self) -> str:
+        """Generate human-readable metrics report"""
+        return self.monitoring_agent.generate_report()
+    
+    def record_feedback(self, concern: str, resource: str, helpful: bool):
+        """Record user feedback for learning"""
+        self.memory_bank.record_interaction(concern, resource, helpful)
+        logger.info(f"Recorded feedback: {concern} -> {resource} (helpful: {helpful})")
+
+
+# ============================================================================
+# DEMONSTRATION & TESTING
+# ============================================================================
+
+async def demo_sequential_agents():
+    """Demonstrate sequential agent workflow"""
+    print("\n" + "="*60)
+    print("DEMO 1: Sequential Agent Workflow")
+    print("="*60 + "\n")
+    
+    orchestrator = MentalHealthOrchestrator()
+    
+    # Test case 1: Moderate concern
+    print("Test Case 1: User with anxiety\n")
+    result1 = await orchestrator.process_request(
+        "I've been feeling really anxious lately and having trouble sleeping"
+    )
+    print(f"Response:\n{result1['response']}\n")
+    print(f"Crisis Level: {result1['crisis_level']}")
+    print(f"Response Time: {result1['response_time']:.2f}s\n")
+    
+    # Test case 2: Emergency situation
+    print("\n" + "-"*60 + "\n")
+    print("Test Case 2: Emergency situation\n")
+    result2 = await orchestrator.process_request(
+        "I don't want to live anymore, everything feels hopeless"
+    )
+    print(f"Response:\n{result2['response']}\n")
+    print(f"Crisis Level: {result2['crisis_level']}")
+    print(f"Response Time: {result2['response_time']:.2f}s\n")
+
+
+async def demo_parallel_agents():
+    """Demonstrate parallel agent processing"""
+    print("\n" + "="*60)
+    print("DEMO 2: Parallel Agent Processing")
+    print("="*60 + "\n")
+    
+    orchestrator = MentalHealthOrchestrator()
+    
+    # Multiple requests to process simultaneously
+    requests = [
+        "I'm dealing with depression and need support",
+        "Having panic attacks at work",
+        "Can't stop worrying about everything"
+    ]
+    
+    print(f"Processing {len(requests)} requests in parallel...\n")
+    
+    start_time = datetime.now()
+    results = await orchestrator.process_parallel_requests(requests)
+    end_time = datetime.now()
+    
+    total_time = (end_time - start_time).total_seconds()
+    
+    for i, result in enumerate(results, 1):
+        print(f"Request {i}: Crisis Level = {result['crisis_level']}")
+    
+    print(f"\nTotal parallel processing time: {total_time:.2f}s")
+    print(f"Average per request: {total_time/len(requests):.2f}s")
+
+
+async def demo_memory_and_learning():
+    """Demonstrate memory bank and learning"""
+    print("\n" + "="*60)
+    print("DEMO 3: Memory Bank & Learning")
+    print("="*60 + "\n")
+    
+    orchestrator = MentalHealthOrchestrator()
+    
+    # Simulate feedback for learning
+    print("Recording user feedback...\n")
+    orchestrator.record_feedback("anxiety", "Crisis Text Line", True)
+    orchestrator.record_feedback("depression", "BetterHelp Online Therapy", True)
+    orchestrator.record_feedback("anxiety", "NAMI Helpline", True)
+    orchestrator.record_feedback("stress", "Crisis Text Line", True)
+    
+    # Check what the system learned
+    top_resources = orchestrator.memory_bank.get_top_resources(3)
+    common_concerns = orchestrator.memory_bank.get_common_concerns(3)
+    
+    print("Top Resources (based on feedback):")
+    for i, resource in enumerate(top_resources, 1):
+        print(f"  {i}. {resource}")
+    
+    print("\nMost Common Concerns:")
+    for i, concern in enumerate(common_concerns, 1):
+        print(f"  {i}. {concern}")
+
+
+async def demo_session_management():
+    """Demonstrate session management and state"""
+    print("\n" + "="*60)
+    print("DEMO 4: Session Management & State")
+    print("="*60 + "\n")
+    
+    orchestrator = MentalHealthOrchestrator()
+    
+    # First interaction
+    print("First interaction:\n")
+    result1 = await orchestrator.process_request(
+        "I've been feeling down lately",
+        session_id="user_123"
+    )
+    print(f"Response: {result1['response'][:100]}...\n")
+    
+    # Second interaction (same session)
+    print("Second interaction (same session):\n")
+    result2 = await orchestrator.process_request(
+        "Thanks, can you tell me more about therapy options?",
+        session_id="user_123"
+    )
+    
+    # Check session history
+    history = orchestrator.get_session_history("user_123")
+    print(f"Session ID: {history['session_id']}")
+    print(f"Total messages in conversation: {len(history['conversation_history'])}")
+    print(f"User concerns tracked: {history['user_concerns']}")
+    print(f"Resources recommended: {len(history['recommended_resources'])}")
+
+
+async def demo_observability():
+    """Demonstrate observability features"""
+    print("\n" + "="*60)
+    print("DEMO 5: Observability - Metrics & Monitoring")
+    print("="*60 + "\n")
+    
+    orchestrator = MentalHealthOrchestrator()
+    
+    # Process several requests to generate metrics
+    print("Processing multiple interactions...\n")
+    
+    test_inputs = [
+        "I'm feeling anxious",
+        "I can't stop thinking about hurting myself",
+        "Just feeling a bit stressed",
+        "Overwhelmed with work and life",
+        "Need someone to talk to about depression"
+    ]
+    
+    for input_text in test_inputs:
+        await orchestrator.process_request(input_text)
+    
+    # Display metrics report
+    print(orchestrator.generate_metrics_report())
+    
+    # Show detailed metrics
+    metrics = orchestrator.get_system_metrics()
+    print("\nDetailed Metrics:")
+    print(f"Emergency Response Rate: {metrics['emergency_cases']/metrics['total_sessions']*100:.1f}%")
+    print(f"High Risk Rate: {metrics['high_risk_cases']/metrics['total_sessions']*100:.1f}%")
+
+
+async def main():
+    """Run all demonstrations"""
+    print("\n" + "="*60)
+    print("AI AGENTS FOR GOOD - MENTAL HEALTH SUPPORT SYSTEM")
+    print("Multi-Agent System Demonstration")
+    print("="*60)
+    
+    # Run all demos
+    await demo_sequential_agents()
+    await demo_parallel_agents()
+    await demo_memory_and_learning()
+    await demo_session_management()
+    await demo_observability()
+    
+    print("\n" + "="*60)
+    print("All demonstrations completed!")
+    print("="*60 + "\n")
+
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+
+if __name__ == "__main__":
+    # Run the demonstration
+    asyncio.run(main())
+
+
+"""
+KEY CONCEPTS DEMONSTRATED:
+
+1. MULTI-AGENT SYSTEM:
+   - TriageAgent: Assesses mental health situations
+   - ResourceAgent: Finds appropriate resources
+   - SupportAgent: Provides empathetic responses
+   - MonitoringAgent: Tracks system performance
+   - Sequential workflow: Triage → Resource → Support → Monitor
+   - Parallel processing: Handle multiple users simultaneously
+
+2. TOOLS:
+   - Custom Tools: CrisisDetectionTool for safety assessment
+   - MCP Simulation: ResourceDatabaseTool (database connection)
+   - Built-in Tools: WebSearchTool for information retrieval
+   - All tools integrate seamlessly with agents
+
+3. SESSIONS & MEMORY:
+   - InMemorySessionService: Manages user sessions and state
+   - MemoryBank: Long-term learning from interactions
+   - Tracks conversation history, concerns, and outcomes
+
+4. OBSERVABILITY:
+   - Comprehensive logging throughout the system
+   - MonitoringAgent tracks metrics and performance
+   - Detailed reports on system usage and effectiveness
+
+5. CONTEXT ENGINEERING:
+   - Session history maintains conversation context
+   - Crisis level prioritization for urgent situations
+   - Resource ranking based on past success
+
+USAGE EXAMPLES:
+
+# Single request
+orchestrator = MentalHealthOrchestrator()
+result = await orchestrator.process_request("I'm feeling anxious")
+
+# Parallel requests
+results = await orchestrator.process_parallel_requests([
+    "Need help with depression",
+    "Having panic attacks"
+])
+
+# Session continuity
+result1 = await orchestrator.process_request("Feeling down", session_id="user_123")
+result2 = await orchestrator.process_request("Tell me more", session_id="user_123")
+
+# Feedback for learning
+orchestrator.record_feedback("anxiety", "Crisis Text Line", helpful=True)
+
+# System metrics
+metrics = orchestrator.get_system_metrics()
+report = orchestrator.generate_metrics_report()
+
+DEPLOYMENT CONSIDERATIONS:
+
+1. Replace simulated tools with real APIs:
+   - Connect to actual mental health resource databases
+   - Integrate real LLM (Gemini, Claude, GPT)
+   - Use actual web search API
+
+2. Add authentication and user management
+
+3. Implement proper database for sessions and memory
+
+4. Add HIPAA compliance and security measures
+
+5. Deploy with:
+   - FastAPI or Flask for REST API
+   - Docker for containerization
+   - Kubernetes for scaling
+   - Cloud deployment (GCP, AWS, Azure)
+
+6. Monitor with:
+   - Prometheus for metrics
+   - Grafana for dashboards
+   - Sentry for error tracking
+
+SAFETY & ETHICS:
+
+- Always prioritizes user safety
+- Immediately provides crisis resources for emergencies
+- Maintains conversation history for context
+- Learns from interactions to improve recommendations
+- Respects user privacy and confidentiality
+- Complements (not replaces) professional help
+
+This system demonstrates how AI agents can be used for social good,
+providing 24/7 support and connecting people with mental health resources.
+"""
